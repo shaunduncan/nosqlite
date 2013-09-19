@@ -18,11 +18,14 @@ class ConnectionTestCase(TestCase):
         assert conn.db.close.called
 
     @patch('nosqlite.sqlite3')
-    def test_getitem_returns_collection(self, sqlite):
+    @patch('nosqlite.Collection')
+    def test_getitem_returns_collection(self, mock_collection, sqlite):
+        sqlite.connect.return_value = sqlite
+        mock_collection.return_value = mock_collection
         conn = nosqlite.Connection()
 
         assert 'foo' not in conn._collections
-        assert isinstance(conn['foo'], nosqlite.Collection)
+        assert conn['foo'] == mock_collection
 
     @patch('nosqlite.sqlite3')
     def test_getitem_returns_cached_collection(self, sqlite):

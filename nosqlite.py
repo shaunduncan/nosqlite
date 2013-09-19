@@ -97,7 +97,7 @@ class Collection(object):
         """
         Creates the collections database only if it does not already exist
         """
-        self.client.db.execute("""
+        self.db.execute("""
             create table if not exists %s (
                 id integer auto increment primary key,
                 data blob not null
@@ -115,21 +115,21 @@ class Collection(object):
         Inserts one or more documents into this collection. If a document already
         has an '_id' value, it will be updated
         """
-        raise NotImplementedError
+        pass
 
     def update(self, *documents):
         """
         Inserts one or more documents into this collection. If a document does not
         already have an '_id' value, it will be created
         """
-        raise NotImplementedError
+        pass
 
     def remove(self, *documents):
         """
         Removes one or more documents from this collection. This will ignore any document
         that does not have an '_id' attribute
         """
-        raise NotImplementedError
+        pass
 
     def save(self, *documents):
         """
@@ -141,41 +141,37 @@ class Collection(object):
         """
         Alias for ``remove``
         """
-        raise NotImplementedError
+        pass
 
     def find(self):
-        raise NotImplementedError
+        pass
 
     def find_one(self):
-        raise NotImplementedError
+        pass
 
     def find_and_modify(self):
-        raise NotImplementedError
+        pass
 
     def count(self):
-        raise NotImplementedError
+        pass
 
     def create_index(self):
-        raise NotImplementedError
+        pass
 
     def ensure_index(self):
-        raise NotImplementedError
+        pass
 
     def drop_index(self):
-        raise NotImplementedError
+        pass
 
     def drop_indexes(self):
         """
         Drop all indexes for this collection
         """
-        raise NotImplementedError
+        pass
 
     def rename(self, new_name):
-        raise NotImplementedError
+        pass
 
     def distinct(self, key):
-        raise NotImplementedError
-
-
-class Document(object):
-    pass
+        pass
