@@ -202,7 +202,10 @@ class Collection(object):
         results = []
         query = query or {}
 
+        # TODO: When indexes are implemented, we'll need to intelligently hit one of the
+        # index stores so we don't do a full table scan
         cursor = self.db.execute("select id, data from %s" % self.name)
+
         for id, data in cursor.fetchall():
             document = self._load_document(id, data)
 
