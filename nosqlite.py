@@ -167,17 +167,79 @@ class Collection(object):
         """
         return self.remove(document)
 
-    def find(self):
-        pass
+    def _load_document(self, id, data):
+        """
+        Loads a pickled document taking care to apply the document id
+        """
+        document = pickle.loads(data.encode('utf-8'))
+        document['_id'] = id
+        return document
 
-    def find_one(self):
-        pass
+    def _has_all_keys(self, keys, document):
+        """
+        Returns True if a document (dict) has every key in list of keys
 
-    def find_and_modify(self):
-        pass
+        :param keys: an iterable (list, tuple) of keys to check
+        :param document: a python dict
+        """
+        keyset = set(keys)
+        return keyset.intersection(document.keys()) == keyset
 
-    def count(self):
-        pass
+    def _has_any_key(self, keys, document):
+        """
+        Returns true if a document (dict) has any of list of keys
+
+        :param keys: an iterable (list, tuple) of keys to check
+        :param document: a python dict
+        """
+        keyset = set(keys)
+        return len(keyset.intersection(document.keys())) > 0
+
+    def find(self, query=None, limit=None):
+        """
+        Returns a list of documents in this collection that match a given query
+        """
+        results = []
+        query = query or {}
+
+        cursor = self.db.execute("select id, data from %s" % self.name)
+        for id, data in cursor.fetchall():
+            document = self._load_document(id, data)
+
+            if self._has_all_keys(query.keys(), document):
+                for key, value in query.iteritems():
+                    if document[key] != value:
+                        break
+                else:
+                    results.append(document)
+
+                    # Just return if we already reached the limit
+                    if limit and len(results) == limit:
+                        return results
+
+        return results
+
+    def find_one(self, query=None):
+        """
+        Equivalent to ``find(query, limit=1)[0]``
+        """
+        return self.find(query=query, limit=1)[0]
+
+    def find_and_modify(self, query=None, update=None):
+        """
+        Finds documents in this collection that match a given query and updates them
+        """
+        update = update or {}
+
+        for document in self.find(query=query):
+            document.update(update)
+            self.update(document)
+
+    def count(self, query=None):
+        """
+        Equivalent to ``len(find(query))``
+        """
+        return len(self.find(query=query))
 
     def create_index(self):
         pass

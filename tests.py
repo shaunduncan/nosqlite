@@ -113,3 +113,55 @@ class CollectionTestCase(TestCase):
 
         self.collection.remove(doc)
         assert 0 == int(self.collection.db.execute("select count(1) from foo").fetchone()[0])
+
+    def test_has_all_keys_passes(self):
+        keys = ('foo', 'bar', 'baz')
+        doc = dict.fromkeys(keys, '')
+        assert self.collection._has_all_keys(keys, doc)
+
+    def test_has_all_keys_fails(self):
+        keys = ('foo', 'bar', 'baz')
+        doc = dict.fromkeys(('foo', 'bar'), '')
+        assert not self.collection._has_all_keys(keys, doc)
+
+    def test_has_any_key_passes(self):
+        doc = dict.fromkeys(('foo', 'bar'), '')
+        assert self.collection._has_any_key(('foo', 'baz'), doc)
+
+    def test_has_any_key_fails(self):
+        doc = dict.fromkeys(('foo', 'bar'), '')
+        assert not self.collection._has_any_key(('qux', 'baz'), doc)
+
+    def test_find(self):
+        query = {'foo': 'bar'}
+        documents = [
+            (1, {'foo': 'bar', 'baz': 'qux'}),  # Will match
+            (2, {'foo': 'bar', 'bar': 'baz'}),  # Will match
+            (2, {'foo': 'baz', 'bar': 'baz'}),  # Will not match
+            (3, {'baz': 'qux'}),  # Will not match
+        ]
+
+        collection = nosqlite.Collection(Mock(), 'foo', create=False)
+        collection.db.execute.return_value = collection.db
+        collection.db.fetchall.return_value = documents
+        collection._load_document = lambda id, data: data
+
+        ret = collection.find(query)
+        assert len(ret) == 2
+
+    def test_find_honors_limit(self):
+        query = {'foo': 'bar'}
+        documents = [
+            (1, {'foo': 'bar', 'baz': 'qux'}),  # Will match
+            (2, {'foo': 'bar', 'bar': 'baz'}),  # Will match
+            (2, {'foo': 'baz', 'bar': 'baz'}),  # Will not match
+            (3, {'baz': 'qux'}),  # Will not match
+        ]
+
+        collection = nosqlite.Collection(Mock(), 'foo', create=False)
+        collection.db.execute.return_value = collection.db
+        collection.db.fetchall.return_value = documents
+        collection._load_document = lambda id, data: data
+
+        ret = collection.find(query, limit=1)
+        assert len(ret) == 1
