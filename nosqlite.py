@@ -1,3 +1,4 @@
+import cPickle as pickle
 import sqlite3
 
 """
@@ -70,6 +71,12 @@ class Connection(object):
         self.close()
         return False
 
+    def drop_collection(self, name):
+        """
+        Drops a collection permanently if it exists
+        """
+        self.db.execute("drop table if exists %s" % name)
+
 
 class Collection(object):
     """
@@ -99,49 +106,66 @@ class Collection(object):
         """
         self.db.execute("""
             create table if not exists %s (
-                id integer auto increment primary key,
+                id integer primary key autoincrement,
                 data blob not null
             )
         """ % self.name)
 
-    def drop_collection(self):
+    def insert(self, document):
         """
-        Drops this collection permanently if it does not exist
-        """
-        self.db.execute("drop table if exists %s" % self.name)
+        Inserts a document into this collection. If a document already has an '_id'
+        value it will be updated
 
-    def insert(self, *documents):
+        :returns: inserted document with id
         """
-        Inserts one or more documents into this collection. If a document already
-        has an '_id' value, it will be updated
-        """
-        pass
+        if '_id' in document:
+            return self.update(document)
 
-    def update(self, *documents):
+        # Create it and return a modified one with the id
+        cursor = self.db.execute("""
+            insert into %s(data) values (?)
+        """ % self.name, (pickle.dumps(document),))
+
+        document['_id'] = cursor.lastrowid
+        return document
+
+    def update(self, document):
         """
-        Inserts one or more documents into this collection. If a document does not
+        Updates a document stored in this collection. If the document does not
         already have an '_id' value, it will be created
         """
-        pass
+        if '_id' not in document:
+            return self.insert(document)
 
-    def remove(self, *documents):
-        """
-        Removes one or more documents from this collection. This will ignore any document
-        that does not have an '_id' attribute
-        """
-        pass
+        # Update the stored document, removing the id
+        copy = document.copy()
+        del copy['_id']
 
-    def save(self, *documents):
+        self.db.execute("""
+            update %s set data = ? where id = ?
+        """ % self.name, (pickle.dumps(copy), document['_id']))
+
+        return document
+
+    def remove(self, document):
+        """
+        Removes a document from this collection. This will raise AssertionError if the
+        document does not have an _id attribute
+        """
+        assert '_id' in document, 'Document must have an id'
+        self.db.execute("delete from %s where id = ?" % self.name, (document['_id'],))
+
+    def save(self, document):
         """
         Alias for ``update``
         """
-        return self.update(*documents)
+        return self.update(document)
 
-    def delete(self, *documents):
+    def delete(self, document):
         """
         Alias for ``remove``
         """
-        pass
+        return self.remove(document)
 
     def find(self):
         pass
