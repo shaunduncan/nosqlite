@@ -5,18 +5,6 @@ import sys
 from functools import partial
 from itertools import ifilter, imap, starmap
 
-"""
-LOGICAL
-$or : {"$or": [{"a": 1}, {"b": {"$gt": 5}}]}
-$and: {"$and": [{"a": 1}, {"b": {"$gt": 5}}]}
-$not: {"$not": {"a": {"$gt": 5}}}  # {"a": {"$lte": 5}} should return ONLY if field exists
-$nor: {"$nor": [{"a": 1}, {"b": 5}]}  # a != 1 AND b != 5
-
-ELEMENT
-$exists: {"a": {"$exists": true, "$nin": [1, 2, 3]}}  # enforce field existence check
-$mod   : {"a": {"$mod": [4, 0]}}  # a % 4 == 0
-"""
-
 
 class MalformedQueryException(Exception):
     pass
@@ -166,26 +154,6 @@ class Collection(object):
         document['_id'] = id
         return document
 
-    def _has_all_keys(self, keys, document):
-        """
-        Returns True if a document (dict) has every key in list of keys
-
-        :param keys: an iterable (list, tuple) of keys to check
-        :param document: a python dict
-        """
-        keyset = set(keys)
-        return keyset.intersection(document.keys()) == keyset
-
-    def _has_any_key(self, keys, document):
-        """
-        Returns true if a document (dict) has any of list of keys
-
-        :param keys: an iterable (list, tuple) of keys to check
-        :param document: a python dict
-        """
-        keyset = set(keys)
-        return len(keyset.intersection(document.keys())) > 0
-
     def find(self, query=None, limit=None):
         """
         Returns a list of documents in this collection that match a given query
@@ -210,7 +178,42 @@ class Collection(object):
     def _apply_query(self, query, document):
         """
         Applies a query to a document. Returns True if the document meets the criteria of
-        the supplied query
+        the supplied query. The ``query`` argument generally follows mongodb style syntax
+        and consists of the following logical checks and operators.
+
+        Logical: $and, $or, $nor, $not
+        Operators: $eq, $ne, $gt, $gte, $lt, $lte, $mod, $in, $nin, $all
+
+        If no logical operator is supplied, it assumed that all field checks must pass. For
+        example, these are equivalent:
+
+            {'foo': 'bar', 'baz': 'qux'}
+            {'$and': [{'foo': 'bar'}, {'baz': 'qux'}]}
+
+        Both logical and operational queries can be nested in a complex fashion:
+
+            {
+                'bar': 'baz',
+                '$or': [
+                    {
+                        'foo': {
+                            '$gte': 0,
+                            '$lte': 10,
+                            '$mod': [2, 0]
+                        }
+                    },
+                    {
+                        'foo': {
+                            '$gt': 10,
+                            '$mod': [2, 1]
+                        }
+                    },
+                ]
+            }
+
+        In the previous example, this will return any document where the 'bar' key is equal
+        to 'baz' and either the 'foo' key is an even number between 0 and 10 or is an odd number
+        greater than 10.
         """
         matches = []  # A list of booleans
         reapply = lambda q: self._apply_query(q, document)
@@ -280,6 +283,23 @@ class Collection(object):
         """
         return len(self.find(query=query))
 
+    def rename(self, new_name):
+        """
+        Rename this collection
+        """
+        new_collection = Collection(self.db, new_name, create=False)
+        assert not new_collection.exists()
+
+        self.db.execute("alter table %s rename to %s" % (self.name, new_name))
+        self.name = new_name
+
+    def distinct(self, key):
+        """
+        Get a set of distinct values for the given key excluding an implicit
+        None for documents that do not contain the key
+        """
+        return set(d[key] for d in ifilter(lambda d: key in d, self.find()))
+
     def create_index(self):
         pass
 
@@ -293,12 +313,6 @@ class Collection(object):
         """
         Drop all indexes for this collection
         """
-        pass
-
-    def rename(self, new_name):
-        pass
-
-    def distinct(self, key):
         pass
 
 
@@ -414,3 +428,17 @@ def _mod(field, value, document):
         return int(document.get(field, None)) % divisor == remainder
     except (TypeError, ValueError):
         return False
+
+
+def _exists(field, value, document):
+    """
+    Ensures a document has a given field or not. ``value`` must be either True or
+    False, otherwise a MalformedQueryException is raised
+    """
+    if value not in (True, False):
+        raise MalformedQueryException("'$exists' must be supplied a boolean")
+
+    if value:
+        return field in document
+    else:
+        return field not in document

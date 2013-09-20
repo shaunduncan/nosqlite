@@ -114,24 +114,6 @@ class CollectionTestCase(TestCase):
         self.collection.remove(doc)
         assert 0 == int(self.collection.db.execute("select count(1) from foo").fetchone()[0])
 
-    def test_has_all_keys_passes(self):
-        keys = ('foo', 'bar', 'baz')
-        doc = dict.fromkeys(keys, '')
-        assert self.collection._has_all_keys(keys, doc)
-
-    def test_has_all_keys_fails(self):
-        keys = ('foo', 'bar', 'baz')
-        doc = dict.fromkeys(('foo', 'bar'), '')
-        assert not self.collection._has_all_keys(keys, doc)
-
-    def test_has_any_key_passes(self):
-        doc = dict.fromkeys(('foo', 'bar'), '')
-        assert self.collection._has_any_key(('foo', 'baz'), doc)
-
-    def test_has_any_key_fails(self):
-        doc = dict.fromkeys(('foo', 'bar'), '')
-        assert not self.collection._has_any_key(('qux', 'baz'), doc)
-
     def test_find(self):
         query = {'foo': 'bar'}
         documents = [
@@ -282,3 +264,69 @@ class CollectionTestCase(TestCase):
 
         with raises(nosqlite.MalformedQueryException):
             self.collection._apply_query(query, {'foo': 5})
+
+    def test_apply_query_honors_multiple_operators(self):
+        query = {'foo': {'$gte': 0, '$lte': 10, '$mod': [2, 0]}}
+
+        assert self.collection._apply_query(query, {'foo': 4})
+        assert not self.collection._apply_query(query, {'foo': 3})
+        assert not self.collection._apply_query(query, {'foo': 15})
+        assert not self.collection._apply_query(query, {'foo': 'foo'})
+
+    def test_apply_query_honors_logical_and_operators(self):
+        # 'bar' must be 'baz', and 'foo' must be an even number 0-10 or an odd number > 10
+        query = {
+            'bar': 'baz',
+            '$or': [
+                {'foo': {'$gte': 0, '$lte': 10, '$mod': [2, 0]}},
+                {'foo': {'$gt': 10, '$mod': [2, 1]}},
+            ]
+        }
+
+        assert self.collection._apply_query(query, {'bar': 'baz', 'foo': 4})
+        assert self.collection._apply_query(query, {'bar': 'baz', 'foo': 15})
+        assert not self.collection._apply_query(query, {'bar': 'baz', 'foo': 14})
+        assert not self.collection._apply_query(query, {'bar': 'qux', 'foo': 4})
+
+    def test_apply_query_exists(self):
+        query_exists = {'foo': {'$exists': True}}
+        query_not_exists = {'foo': {'$exists': False}}
+
+        assert self.collection._apply_query(query_exists, {'foo': 'bar'})
+        assert self.collection._apply_query(query_not_exists, {'bar': 'baz'})
+        assert not self.collection._apply_query(query_exists, {'baz': 'bar'})
+        assert not self.collection._apply_query(query_not_exists, {'foo': 'bar'})
+
+    def test_apply_query_exists_raises(self):
+        query = {'foo': {'$exists': 'foo'}}
+
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_distinct(self):
+        docs = [
+            {'foo': 'bar'},
+            {'foo': 'baz'},
+            {'foo': 10},
+            {'bar': 'foo'}
+        ]
+        self.collection.find = lambda: docs
+
+        assert set(('bar', 'baz', 10)) == self.collection.distinct('foo')
+
+    def test_rename_raises_for_collision(self):
+        nosqlite.Collection(self.db, 'bar')  # Create a collision point
+        self.collection.create()
+
+        with raises(AssertionError):
+            self.collection.rename('bar')
+
+    def test_rename(self):
+        self.collection.create()
+        assert self.collection.exists()
+
+        self.collection.rename('bar')
+        assert self.collection.name == 'bar'
+        assert self.collection.exists()
+
+        assert not nosqlite.Collection(self.db, 'foo', create=False).exists()
