@@ -165,3 +165,30 @@ class CollectionTestCase(TestCase):
 
         ret = collection.find(query, limit=1)
         assert len(ret) == 1
+
+    def test_apply_query_and_type(self):
+        query = {'$and': [{'foo': 'bar'}, {'baz': 'qux'}]}
+
+        assert self.collection._apply_query(query, {'foo': 'bar', 'baz': 'qux'})
+        assert not self.collection._apply_query(query, {'foo': 'bar', 'baz': 'foo'})
+
+    def test_apply_query_or_type(self):
+        query = {'$or': [{'foo': 'bar'}, {'baz': 'qux'}]}
+
+        assert self.collection._apply_query(query, {'foo': 'bar', 'abc': 'xyz'})
+        assert self.collection._apply_query(query, {'baz': 'qux', 'abc': 'xyz'})
+        assert not self.collection._apply_query(query, {'abc': 'xyz'})
+
+    def test_apply_query_not_type(self):
+        query = {'$not': {'foo': 'bar'}}
+
+        assert self.collection._apply_query(query, {'foo': 'baz'})
+        assert not self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_apply_query_nor_type(self):
+        query = {'$nor': [{'foo': 'bar'}, {'baz': 'qux'}]}
+
+        assert self.collection._apply_query(query, {'foo': 'baz', 'baz': 'bar'})
+        assert not self.collection._apply_query(query, {'foo': 'bar'})
+        assert not self.collection._apply_query(query, {'baz': 'qux'})
+        assert not self.collection._apply_query(query, {'foo': 'bar', 'baz': 'qux'})

@@ -1,17 +1,10 @@
 import cPickle as pickle
 import sqlite3
 
-"""
-OPERATIONS
-$all: {"a": {"$all": [1, 2, 3]}}  # == all()
-$gt : {"a": {"$gt": 5}}
-$gte: {"a": {"$gte": 5}}
-$in : {"a": {"$in": [1, 2, 3]}}  # == any()
-$lt : {"a": {"$lt": 5}}
-$lte: {"a": {"$lte": 5}}
-$ne : {"a": {"$ne": 5}}  # not equal
-$nin: {"a": {"$nin": [1, 2, 3]}}  # not in
+from functools import partial
+from itertools import ifilter, imap, starmap
 
+"""
 LOGICAL
 $or : {"$or": [{"a": 1}, {"b": {"$gt": 5}}]}
 $and: {"$and": [{"a": 1}, {"b": {"$gt": 5}}]}
@@ -21,13 +14,6 @@ $nor: {"$nor": [{"a": 1}, {"b": 5}]}  # a != 1 AND b != 5
 ELEMENT
 $exists: {"a": {"$exists": true, "$nin": [1, 2, 3]}}  # enforce field existence check
 $mod   : {"a": {"$mod": [4, 0]}}  # a % 4 == 0
-
-UPDATES
-$set  : coll.update(...filter..., {"$set": {"a": 5}})
-$unset: coll.update(...filter..., {"$unset": {"a": ""}})  # Remove field
-
-...
-http://docs.mongodb.org/manual/reference/operator/
 """
 
 
@@ -205,22 +191,43 @@ class Collection(object):
         # TODO: When indexes are implemented, we'll need to intelligently hit one of the
         # index stores so we don't do a full table scan
         cursor = self.db.execute("select id, data from %s" % self.name)
+        fn = partial(self._apply_query, query)
 
-        for id, data in cursor.fetchall():
-            document = self._load_document(id, data)
+        for doc in ifilter(fn, starmap(self._load_document, cursor.fetchall())):
+            results.append(doc)
 
-            if self._has_all_keys(query.keys(), document):
-                for key, value in query.iteritems():
-                    if document[key] != value:
-                        break
-                else:
-                    results.append(document)
-
-                    # Just return if we already reached the limit
-                    if limit and len(results) == limit:
-                        return results
+            # Just return if we already reached the limit
+            if limit and len(results) == limit:
+                return results
 
         return results
+
+    def _apply_query(self, query, document):
+        matches = []  # A list of booleans
+        reapply = lambda q: self._apply_query(q, document)
+
+        for field, value in query.iteritems():
+            # A more complex query type $and, $or, etc
+            if field == '$and':
+                matches.append(all(imap(reapply, value)))
+            elif field == '$or':
+                matches.append(any(imap(reapply, value)))
+            elif field == '$nor':
+                matches.append(not any(imap(reapply, value)))
+            elif field == '$not':
+                matches.append(not self._apply_query(value, document))
+
+            # Invoke a query operator
+            elif isinstance(value, dict):
+                for operation, arg in value.iteritems():
+                    # FIXME
+                    pass
+
+            # Standard
+            elif value != document.get(field, None):
+                matches.append(False)
+
+        return all(matches)
 
     def find_one(self, query=None):
         """
@@ -264,3 +271,42 @@ class Collection(object):
 
     def distinct(self, key):
         pass
+
+
+# BELOW ARE OPERATIONS FOR LOOKUPS
+def _eq(field, value, document):
+    return document.get(field, None) == value
+
+
+def _gt(field, value, document):
+    return document.get(field, None) > value
+
+
+def _lt(field, value, document):
+    return document.get(field, None) < value
+
+
+def _gte(field, value, document):
+    return document.get(field, None) >= value
+
+
+def _lte(field, value, document):
+    return document.get(field, None) <= value
+
+
+def _all(field, value, document):
+    a = set(value)
+    b = set(document.get(field, []))
+    return a.intersection(b) == a
+
+
+def _in(field, value, document):
+    return document.get(field, None) in value
+
+
+def _ne(field, value, document):
+    return document.get(field, None) != value
+
+
+def _nin(field, value, document):
+    return document.get(field, None) not in value
