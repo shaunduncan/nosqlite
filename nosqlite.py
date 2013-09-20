@@ -71,7 +71,7 @@ class Collection(object):
 
     def clear(self):
         """
-        Clears all stored documents in this database
+        Clears all stored documents in this database. THERE IS NO GOING BACK
         """
         self.db.execute("delete from %s" % self.name)
 
