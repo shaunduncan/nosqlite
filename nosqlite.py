@@ -254,10 +254,11 @@ class Collection(object):
 
     def _get_operator_fn(self, op):
         """
-        Returns True if operator such as $gt or $eq is a valid operator.
-        This simly checks if there is a method that handles the operator defined
+        Returns the function in this module that corresponds to an operator string.
+        This simply checks if there is a method that handles the operator defined
         in this module, replacing '$' with '_' (i.e. if this module has a _gt
-        method for $gt)
+        method for $gt) and returns it. If no match is found, or the operator does not
+        start with '$', a MalformedQueryException is raised
         """
         if not op.startswith('$'):
             raise MalformedQueryException("Operator '%s' is not a valid query operation" % op)
