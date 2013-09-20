@@ -1,5 +1,6 @@
 import cPickle as pickle
 import sqlite3
+import sys
 
 from functools import partial
 from itertools import ifilter, imap, starmap
@@ -15,6 +16,10 @@ ELEMENT
 $exists: {"a": {"$exists": true, "$nin": [1, 2, 3]}}  # enforce field existence check
 $mod   : {"a": {"$mod": [4, 0]}}  # a % 4 == 0
 """
+
+
+class MalformedQueryException(Exception):
+    pass
 
 
 class Connection(object):
@@ -153,7 +158,7 @@ class Collection(object):
         """
         return self.remove(document)
 
-    def _load_document(self, id, data):
+    def _unpickle(self, id, data):
         """
         Loads a pickled document taking care to apply the document id
         """
@@ -191,10 +196,10 @@ class Collection(object):
         # TODO: When indexes are implemented, we'll need to intelligently hit one of the
         # index stores so we don't do a full table scan
         cursor = self.db.execute("select id, data from %s" % self.name)
-        fn = partial(self._apply_query, query)
+        apply = partial(self._apply_query, query)
 
-        for doc in ifilter(fn, starmap(self._load_document, cursor.fetchall())):
-            results.append(doc)
+        for match in ifilter(apply, starmap(self._unpickle, cursor.fetchall())):
+            results.append(match)
 
             # Just return if we already reached the limit
             if limit and len(results) == limit:
@@ -203,9 +208,15 @@ class Collection(object):
         return results
 
     def _apply_query(self, query, document):
+        """
+        Applies a query to a document. Returns True if the document meets the criteria of
+        the supplied query
+        """
         matches = []  # A list of booleans
         reapply = lambda q: self._apply_query(q, document)
 
+        # FIXME: Fields need to support dot notation for sub-documents
+        # i.e. {'foo.bar': 5} --> doc['foo']['bar'] == 5
         for field, value in query.iteritems():
             # A more complex query type $and, $or, etc
             if field == '$and':
@@ -219,15 +230,33 @@ class Collection(object):
 
             # Invoke a query operator
             elif isinstance(value, dict):
-                for operation, arg in value.iteritems():
-                    # FIXME
-                    pass
+                for operator, arg in value.iteritems():
+                    if not self._get_operator_fn(operator)(field, arg, document):
+                        matches.append(False)
+                        break
+                else:
+                    matches.append(True)
 
             # Standard
             elif value != document.get(field, None):
                 matches.append(False)
 
         return all(matches)
+
+    def _get_operator_fn(self, op):
+        """
+        Returns True if operator such as $gt or $eq is a valid operator.
+        This simly checks if there is a method that handles the operator defined
+        in this module, replacing '$' with '_' (i.e. if this module has a _gt
+        method for $gt)
+        """
+        if not op.startswith('$'):
+            raise MalformedQueryException("Operator '%s' is not a valid query operation" % op)
+
+        try:
+            return getattr(sys.modules[__name__], op.replace('$', '_'))
+        except AttributeError:
+            raise MalformedQueryException("Operator '%s' is not currently implemented" % op)
 
     def find_one(self, query=None):
         """
@@ -275,38 +304,113 @@ class Collection(object):
 
 # BELOW ARE OPERATIONS FOR LOOKUPS
 def _eq(field, value, document):
+    """
+    Returns True if the value of a document field is equal to a given value
+    """
     return document.get(field, None) == value
 
 
 def _gt(field, value, document):
+    """
+    Returns True if the value of a document field is greater than a given value
+    """
     return document.get(field, None) > value
 
 
 def _lt(field, value, document):
+    """
+    Returns True if the value of a document field is less than a given value
+    """
     return document.get(field, None) < value
 
 
 def _gte(field, value, document):
+    """
+    Returns True if the value of a document field is greater than or
+    equal to a given value
+    """
     return document.get(field, None) >= value
 
 
 def _lte(field, value, document):
+    """
+    Returns True if the value of a document field is less than or
+    equal to a given value
+    """
     return document.get(field, None) <= value
 
 
 def _all(field, value, document):
-    a = set(value)
-    b = set(document.get(field, []))
-    return a.intersection(b) == a
+    """
+    Returns True if the value of document field contains all the values
+    specified by ``value``. If supplied value is not an iterable, a
+    MalformedQueryException is raised. If the value of the document field
+    is not an iterable, False is returned
+    """
+    try:
+        a = set(value)
+    except TypeError:
+        raise MalformedQueryException("'$all' must accept an iterable")
+
+    try:
+        b = set(document.get(field, []))
+    except TypeError:
+        return False
+    else:
+        return a.intersection(b) == a
 
 
 def _in(field, value, document):
-    return document.get(field, None) in value
+    """
+    Returns True if document[field] is in the interable value. If the
+    supplied value is not an iterable, then a MalformedQueryException is raised
+    """
+    try:
+        values = iter(value)
+    except TypeError:
+        raise MalformedQueryException("'$in' must accept an iterable")
+
+    return document.get(field, None) in values
 
 
 def _ne(field, value, document):
+    """
+    Returns True if the value of document[field] is not equal to a given value
+    """
     return document.get(field, None) != value
 
 
 def _nin(field, value, document):
-    return document.get(field, None) not in value
+    """
+    Returns True if document[field] is NOT in the interable value. If the
+    supplied value is not an iterable, then a MalformedQueryException is raised
+    """
+    try:
+        values = iter(value)
+    except TypeError:
+        raise MalformedQueryException("'$nin' must accept an iterable")
+
+    return document.get(field, None) not in values
+
+
+def _mod(field, value, document):
+    """
+    Performs a mod on a document field. Value must be a list or tuple with
+    two values divisor and remainder (i.e. [2, 0]). This will essentially
+    perform the following:
+
+        document[field] % divisor == remainder
+
+    If the value does not contain integers or is not a two-item list/tuple,
+    a MalformedQueryException will be raised. If the value of document[field]
+    cannot be converted to an integer, this will return False.
+    """
+    try:
+        divisor, remainder = map(int, value)
+    except (TypeError, ValueError):
+        raise MalformedQueryException("'$mod' must accept an iterable: [divisor, remainder]")
+
+    try:
+        return int(document.get(field, None)) % divisor == remainder
+    except (TypeError, ValueError):
+        return False

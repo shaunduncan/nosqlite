@@ -144,7 +144,7 @@ class CollectionTestCase(TestCase):
         collection = nosqlite.Collection(Mock(), 'foo', create=False)
         collection.db.execute.return_value = collection.db
         collection.db.fetchall.return_value = documents
-        collection._load_document = lambda id, data: data
+        collection._unpickle = lambda id, data: data
 
         ret = collection.find(query)
         assert len(ret) == 2
@@ -161,7 +161,7 @@ class CollectionTestCase(TestCase):
         collection = nosqlite.Collection(Mock(), 'foo', create=False)
         collection.db.execute.return_value = collection.db
         collection.db.fetchall.return_value = documents
-        collection._load_document = lambda id, data: data
+        collection._unpickle = lambda id, data: data
 
         ret = collection.find(query, limit=1)
         assert len(ret) == 1
@@ -192,3 +192,93 @@ class CollectionTestCase(TestCase):
         assert not self.collection._apply_query(query, {'foo': 'bar'})
         assert not self.collection._apply_query(query, {'baz': 'qux'})
         assert not self.collection._apply_query(query, {'foo': 'bar', 'baz': 'qux'})
+
+    def test_apply_query_gt_operator(self):
+        query = {'foo': {'$gt': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 10})
+        assert not self.collection._apply_query(query, {'foo': 4})
+
+    def test_apply_query_gte_operator(self):
+        query = {'foo': {'$gte': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 5})
+        assert not self.collection._apply_query(query, {'foo': 4})
+
+    def test_apply_query_lt_operator(self):
+        query = {'foo': {'$lt': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 4})
+        assert not self.collection._apply_query(query, {'foo': 10})
+
+    def test_apply_query_lte_operator(self):
+        query = {'foo': {'$lte': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 5})
+        assert not self.collection._apply_query(query, {'foo': 10})
+
+    def test_apply_query_eq_operator(self):
+        query = {'foo': {'$eq': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 5})
+        assert not self.collection._apply_query(query, {'foo': 4})
+        assert not self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_apply_query_in_operator(self):
+        query = {'foo': {'$in': [1, 2, 3]}}
+
+        assert self.collection._apply_query(query, {'foo': 1})
+        assert not self.collection._apply_query(query, {'foo': 4})
+        assert not self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_apply_query_in_operator_raises(self):
+        query = {'foo': {'$in': 5}}
+
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._apply_query(query, {'foo': 1})
+
+    def test_apply_query_nin_operator(self):
+        query = {'foo': {'$nin': [1, 2, 3]}}
+
+        assert self.collection._apply_query(query, {'foo': 4})
+        assert self.collection._apply_query(query, {'foo': 'bar'})
+        assert not self.collection._apply_query(query, {'foo': 1})
+
+    def test_apply_query_nin_operator_raises(self):
+        query = {'foo': {'$nin': 5}}
+
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._apply_query(query, {'foo': 1})
+
+    def test_apply_query_ne_operator(self):
+        query = {'foo': {'$ne': 5}}
+
+        assert self.collection._apply_query(query, {'foo': 1})
+        assert self.collection._apply_query(query, {'foo': 'bar'})
+        assert not self.collection._apply_query(query, {'foo': 5})
+
+    def test_apply_query_all_operator(self):
+        query = {'foo': {'$all': [1, 2, 3]}}
+
+        assert self.collection._apply_query(query, {'foo': range(10)})
+        assert not self.collection._apply_query(query, {'foo': ['bar', 'baz']})
+        assert not self.collection._apply_query(query, {'foo': 3})
+
+    def test_apply_query_all_operator_raises(self):
+        query = {'foo': {'$all': 3}}
+
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_apply_query_mod_operator(self):
+        query = {'foo': {'$mod': [2, 0]}}
+
+        assert self.collection._apply_query(query, {'foo': 4})
+        assert not self.collection._apply_query(query, {'foo': 3})
+        assert not self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_apply_query_mod_operator_raises(self):
+        query = {'foo': {'$mod': 2}}
+
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._apply_query(query, {'foo': 5})
