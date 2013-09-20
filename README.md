@@ -18,9 +18,8 @@ with nosqlite.Connection(':memory:') as conn:
 
 TODOs
 -----
-- Need to implement better queries. Currently there is an implicit AND query performed
-  but it would be nice to have something like ``{'$gt': {'foo': 5}}``
-- Indexes need to be implemented
+- Indexes need to be implemented and associated query planning
+- Support for embedded documents and queries on those (i.e. {'foo.bar': 5})
 
 
 Contribution and License
