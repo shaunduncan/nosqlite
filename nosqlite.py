@@ -69,6 +69,12 @@ class Collection(object):
         if create:
             self.create()
 
+    def clear(self):
+        """
+        Clears all stored documents in this database
+        """
+        self.db.execute("delete from %s" % self.name)
+
     def exists(self):
         """
         Checks if this collection exists
