@@ -1,4 +1,5 @@
 import cPickle as pickle
+import re
 import sqlite3
 import sys
 
@@ -79,9 +80,13 @@ class Collection(object):
         """
         Checks if this collection exists
         """
-        row = self.db.execute("""
-            select count(1) from sqlite_master where type = 'table' and name = ?
-        """, (self.name,)).fetchone()
+        return self._object_exists('table', self.name)
+
+    def _object_exists(self, type, name):
+        row = self.db.execute(
+            "select count(1) from sqlite_master where type = ? and name = ?",
+            (type, name.strip('[]'))
+        ).fetchone()
 
         return int(row[0]) > 0
 
@@ -307,11 +312,72 @@ class Collection(object):
         """
         return set(d[key] for d in ifilter(lambda d: key in d, self.find()))
 
-    def create_index(self):
-        pass
+    def create_index(self, key, reindex=True, sparse=False):
+        """
+        Creates an index if it does not exist then performs a full reindex for this collection
+        """
+        if isinstance(key, (list, tuple)):
+            index_name = ','.join(key)
+            index_columns = ', '.join('%s text' % f for f in key)
+        else:
+            index_name = key
+            index_columns = '%s text' % key
 
-    def ensure_index(self):
-        pass
+        table_name = '[%s{%s}]' % (self.name, index_name)
+        reindex = reindex or not self._object_exists('table', table_name)
+
+        # Create a table store for the index data
+        self.db.execute("""
+            create table if not exists {table} (
+                id integer primary key,
+                {columns},
+                foreign key(id) references {collection}(id) on delete cascade on update cascade
+            )
+        """.format(
+            table=table_name,
+            collection=self.name,
+            columns=index_columns
+        ))
+
+        # Create the index
+        self.db.execute("""
+            create index if not exists [idx.{collection}{{index}}] on {table}({index})
+        """.format(
+            collection=self.name,
+            index=index_name,
+            table=table_name,
+        ))
+
+        if reindex:
+            self.reindex(key)
+
+    def ensure_index(self, key, sparse=False):
+        """
+        Equivalent to ``create_index(key, reindex=False)``
+        """
+        self.create_index(key, reindex=False, sparse=False)
+
+    def reindex(self, table, sparse=False):
+        index = re.findall(r'^\[.*\{(.*)\}\]$', table)[0].split(',')
+        update = "update {table} set {key} = ? where id = ?"
+        insert = "insert into {table}({index}) values({q})"
+        count = "select count(1) from {table} where id = ?"
+        qs = ('?,' * len(index)).rstrip(',')
+
+        for document in self.find():
+            # Ensure there's a row before we update
+            row = self.db.execute(count.format(table=table), (document['_id'],)).fetchone()
+            if int(row[0]) == 0:
+                self.db.execute(insert.format(table=table, index=index, q=qs),
+                                [None for x in index])
+
+            for key in index:
+                # Ignore this document if it doesn't have the key
+                if key not in document and sparse:
+                    continue
+
+                self.db.execute(update.format(table=table, key=key),
+                                (document.get(key, None), document['_id']))
 
     def drop_index(self):
         pass
