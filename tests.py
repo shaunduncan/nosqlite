@@ -126,7 +126,7 @@ class CollectionTestCase(TestCase):
         collection = nosqlite.Collection(Mock(), 'foo', create=False)
         collection.db.execute.return_value = collection.db
         collection.db.fetchall.return_value = documents
-        collection._unpickle = lambda id, data: data
+        collection._load = lambda id, data: data
 
         ret = collection.find(query)
         assert len(ret) == 2
@@ -143,7 +143,7 @@ class CollectionTestCase(TestCase):
         collection = nosqlite.Collection(Mock(), 'foo', create=False)
         collection.db.execute.return_value = collection.db
         collection.db.fetchall.return_value = documents
-        collection._unpickle = lambda id, data: data
+        collection._load = lambda id, data: data
 
         ret = collection.find(query, limit=1)
         assert len(ret) == 1

@@ -1,4 +1,4 @@
-import cPickle as pickle
+import json
 import re
 import sqlite3
 import sys
@@ -43,6 +43,11 @@ class Connection(object):
         if name not in self._collections:
             self._collections[name] = Collection(self.db, name)
         return self._collections[name]
+
+    def __getattr__(self, name):
+        if name in self.__dict__:
+            return self.__dict__[name]
+        return self[name]
 
     def __enter__(self):
         return self
@@ -97,7 +102,7 @@ class Collection(object):
         self.db.execute("""
             create table if not exists %s (
                 id integer primary key autoincrement,
-                data blob not null
+                data text not null
             )
         """ % self.name)
 
@@ -114,7 +119,7 @@ class Collection(object):
         # Create it and return a modified one with the id
         cursor = self.db.execute("""
             insert into %s(data) values (?)
-        """ % self.name, (pickle.dumps(document),))
+        """ % self.name, (json.dumps(document),))
 
         document['_id'] = cursor.lastrowid
         return document
@@ -133,7 +138,7 @@ class Collection(object):
 
         self.db.execute("""
             update %s set data = ? where id = ?
-        """ % self.name, (pickle.dumps(copy), document['_id']))
+        """ % self.name, (json.dumps(copy), document['_id']))
 
         return document
 
@@ -157,11 +162,11 @@ class Collection(object):
         """
         return self.remove(document)
 
-    def _unpickle(self, id, data):
+    def _load(self, id, data):
         """
-        Loads a pickled document taking care to apply the document id
+        Loads a JSON document taking care to apply the document id
         """
-        document = pickle.loads(data.encode('utf-8'))
+        document = json.loads(data.encode('utf-8'))
         document['_id'] = id
         return document
 
@@ -177,7 +182,7 @@ class Collection(object):
         cursor = self.db.execute("select id, data from %s" % self.name)
         apply = partial(self._apply_query, query)
 
-        for match in ifilter(apply, starmap(self._unpickle, cursor.fetchall())):
+        for match in ifilter(apply, starmap(self._load, cursor.fetchall())):
             results.append(match)
 
             # Just return if we already reached the limit
