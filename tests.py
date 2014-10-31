@@ -1,15 +1,27 @@
 import re
 import sqlite3
 
-from unittest import TestCase
-
 from mock import Mock, patch
-from pytest import raises
+from pytest import raises, fixture
 
 import nosqlite
 
 
-class ConnectionTestCase(TestCase):
+@fixture(scope="module")
+def db(request):
+    _db = sqlite3.connect(':memory:')
+    def fin():
+        _db.close()
+    request.addfinalizer(fin)
+    return _db
+
+@fixture(scope="module")
+def collection(db, request):
+    _collection = nosqlite.Collection(db, 'foo', create=False)
+    return _collection
+
+
+class TestConnection(object):
 
     def test_connect(self):
         conn = nosqlite.Connection(':memory:')
@@ -47,13 +59,13 @@ class ConnectionTestCase(TestCase):
         assert "drop table if exists foo" == conn.db.execute.call_args_list[0][0][0]
 
 
-class CollectionTestCase(TestCase):
+class TestCollection(object):
 
-    def setUp(self):
+    def setup(self):
         self.db = sqlite3.connect(':memory:')
         self.collection = nosqlite.Collection(self.db, 'foo', create=False)
 
-    def tearDown(self):
+    def teardown(self):
         self.db.close()
 
     def unformat_sql(self, sql):
@@ -330,3 +342,13 @@ class CollectionTestCase(TestCase):
         assert self.collection.exists()
 
         assert not nosqlite.Collection(self.db, 'foo', create=False).exists()
+
+
+class TestFindOne(object):
+
+    def test_returns_None_if_collection_does_not_exist(self, collection):
+        assert collection.find_one({}) is None
+
+    def test_returns_None_if_document_is_not_found(self, collection):
+        collection.create()
+        assert collection.find_one({}) is None
