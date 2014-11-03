@@ -282,7 +282,10 @@ class Collection(object):
         """
         Equivalent to ``find(query, limit=1)[0]``
         """
-        return self.find(query=query, limit=1)[0]
+        try:
+            return self.find(query=query, limit=1)[0]
+        except (sqlite3.OperationalError, IndexError):
+            return None
 
     def find_and_modify(self, query=None, update=None):
         """
