@@ -1,10 +1,10 @@
 nosqlite.py
 ===========
 
-``nosqlite.py`` is a pure python library that aims to provide a schemaless wrapper
-for interacting with sqlite databases. Much of the behavior follows how the API
-for [pymongo](http://api.mongodb.org/python/current) works, so those familiar with
-that library should have a similar experience. Example::
+``nosqlite.py`` is a pure python library for python 2 and 3 (2.6, 2.7, 3.3, and 3.4)
+that aims to provide a schemaless wrapper for interacting with sqlite databases.
+Much of the behavior follows how the API for [pymongo](http://api.mongodb.org/python/current)
+works, so those familiar with that library should have a similar experience. Example::
 
 ```python
 import nosqlite

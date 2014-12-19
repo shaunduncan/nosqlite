@@ -2,9 +2,15 @@ import json
 import re
 import sqlite3
 import sys
+import warnings
 
 from functools import partial
-from itertools import ifilter, imap, starmap
+from itertools import starmap
+
+try:
+    from itertools import ifilter as filter, imap as map
+except ImportError:  # pragma: no cover Python >= 3.0
+    pass
 
 
 class MalformedQueryException(Exception):
@@ -166,7 +172,10 @@ class Collection(object):
         """
         Loads a JSON document taking care to apply the document id
         """
-        document = json.loads(data.encode('utf-8'))
+        if isinstance(data, bytes):  # pragma: no cover Python >= 3.0
+            data = data.decode('utf-8')
+
+        document = json.loads(data)
         document['_id'] = id
         return document
 
@@ -182,7 +191,7 @@ class Collection(object):
         cursor = self.db.execute("select id, data from %s" % self.name)
         apply = partial(self._apply_query, query)
 
-        for match in ifilter(apply, starmap(self._load, cursor.fetchall())):
+        for match in filter(apply, starmap(self._load, cursor.fetchall())):
             results.append(match)
 
             # Just return if we already reached the limit
@@ -236,20 +245,20 @@ class Collection(object):
 
         # FIXME: Fields need to support dot notation for sub-documents
         # i.e. {'foo.bar': 5} --> doc['foo']['bar'] == 5
-        for field, value in query.iteritems():
+        for field, value in query.items():
             # A more complex query type $and, $or, etc
             if field == '$and':
-                matches.append(all(imap(reapply, value)))
+                matches.append(all(map(reapply, value)))
             elif field == '$or':
-                matches.append(any(imap(reapply, value)))
+                matches.append(any(map(reapply, value)))
             elif field == '$nor':
-                matches.append(not any(imap(reapply, value)))
+                matches.append(not any(map(reapply, value)))
             elif field == '$not':
                 matches.append(not self._apply_query(value, document))
 
             # Invoke a query operator
             elif isinstance(value, dict):
-                for operator, arg in value.iteritems():
+                for operator, arg in value.items():
                     if not self._get_operator_fn(operator)(field, arg, document):
                         matches.append(False)
                         break
@@ -318,12 +327,13 @@ class Collection(object):
         Get a set of distinct values for the given key excluding an implicit
         None for documents that do not contain the key
         """
-        return set(d[key] for d in ifilter(lambda d: key in d, self.find()))
+        return set(d[key] for d in filter(lambda d: key in d, self.find()))
 
     def create_index(self, key, reindex=True, sparse=False):
         """
         Creates an index if it does not exist then performs a full reindex for this collection
         """
+        warnings.warn('Index support is currently very alpha and is not guaranteed')
         if isinstance(key, (list, tuple)):
             index_name = ','.join(key)
             index_columns = ', '.join('%s text' % f for f in key)
@@ -366,6 +376,7 @@ class Collection(object):
         self.create_index(key, reindex=False, sparse=False)
 
     def reindex(self, table, sparse=False):
+        warnings.warn('Index support is currently very alpha and is not guaranteed')
         index = re.findall(r'^\[.*\{(.*)\}\]$', table)[0].split(',')
         update = "update {table} set {key} = ? where id = ?"
         insert = "insert into {table}({index}) values({q})"
@@ -388,35 +399,47 @@ class Collection(object):
                                 (document.get(key, None), document['_id']))
 
     def drop_index(self):
+        warnings.warn('Index support is currently very alpha and is not guaranteed')
         pass
 
     def drop_indexes(self):
         """
         Drop all indexes for this collection
         """
+        warnings.warn('Index support is currently very alpha and is not guaranteed')
         pass
 
 
 # BELOW ARE OPERATIONS FOR LOOKUPS
+# TypeErrors are caught specifically for python 3 compatibility
 def _eq(field, value, document):
     """
     Returns True if the value of a document field is equal to a given value
     """
-    return document.get(field, None) == value
+    try:
+        return document.get(field, None) == value
+    except TypeError:  # pragma: no cover Python < 3.0
+        return False
 
 
 def _gt(field, value, document):
     """
     Returns True if the value of a document field is greater than a given value
     """
-    return document.get(field, None) > value
+    try:
+        return document.get(field, None) > value
+    except TypeError:  # pragma: no cover Python < 3.0
+        return False
 
 
 def _lt(field, value, document):
     """
     Returns True if the value of a document field is less than a given value
     """
-    return document.get(field, None) < value
+    try:
+        return document.get(field, None) < value
+    except TypeError:  # pragma: no cover Python < 3.0
+        return False
 
 
 def _gte(field, value, document):
@@ -424,7 +447,10 @@ def _gte(field, value, document):
     Returns True if the value of a document field is greater than or
     equal to a given value
     """
-    return document.get(field, None) >= value
+    try:
+        return document.get(field, None) >= value
+    except TypeError:  # pragma: no cover Python < 3.0
+        return False
 
 
 def _lte(field, value, document):
@@ -432,7 +458,10 @@ def _lte(field, value, document):
     Returns True if the value of a document field is less than or
     equal to a given value
     """
-    return document.get(field, None) <= value
+    try:
+        return document.get(field, None) <= value
+    except TypeError:  # pragma: no cover Python < 3.0
+        return False
 
 
 def _all(field, value, document):

@@ -1,8 +1,9 @@
+# coding: utf-8
 import re
 import sqlite3
 
-from mock import Mock, patch
-from pytest import raises, fixture
+from mock import Mock, call, patch
+from pytest import fixture, mark, raises
 
 import nosqlite
 
@@ -10,15 +11,13 @@ import nosqlite
 @fixture(scope="module")
 def db(request):
     _db = sqlite3.connect(':memory:')
-    def fin():
-        _db.close()
-    request.addfinalizer(fin)
+    request.addfinalizer(_db.close)
     return _db
+
 
 @fixture(scope="module")
 def collection(db, request):
-    _collection = nosqlite.Collection(db, 'foo', create=False)
-    return _collection
+    return nosqlite.Collection(db, 'foo', create=False)
 
 
 class TestConnection(object):
@@ -56,7 +55,21 @@ class TestConnection(object):
         conn = nosqlite.Connection()
         conn.drop_collection('foo')
 
-        assert "drop table if exists foo" == conn.db.execute.call_args_list[0][0][0]
+        conn.db.execute.assert_called_with('drop table if exists foo')
+
+    @patch('nosqlite.sqlite3')
+    def test_getattr_returns_attribute(self, sqlite):
+        conn = nosqlite.Connection()
+
+        assert conn.__getattr__('db') in conn.__dict__.values()
+
+    @patch('nosqlite.sqlite3')
+    def test_getattr_returns_collection(self, sqlite):
+        conn = nosqlite.Connection()
+        foo = conn.__getattr__('foo')
+
+        assert foo not in conn.__dict__.values()
+        assert isinstance(foo, nosqlite.Collection)
 
 
 class TestCollection(object):
@@ -71,10 +84,20 @@ class TestCollection(object):
     def unformat_sql(self, sql):
         return re.sub(r'[\s]+', ' ', sql.strip().replace('\n', ''))
 
-    def test_create_has_correct_sql(self):
+    def test_create(self):
         collection = nosqlite.Collection(Mock(), 'foo', create=False)
         collection.create()
-        assert "create table if not exists foo" in collection.db.execute.call_args_list[0][0][0]
+        collection.db.execute.assert_any_call("""
+            create table if not exists foo (
+                id integer primary key autoincrement,
+                data text not null
+            )
+        """)
+
+    def test_clear(self):
+        collection = nosqlite.Collection(Mock(), 'foo')
+        collection.clear()
+        collection.db.execute.assert_any_call('delete from foo')
 
     def test_exists_when_absent(self):
         assert not self.collection.exists()
@@ -97,6 +120,12 @@ class TestCollection(object):
         inserted = self.collection.insert(doc)
         assert inserted['_id'] == 1
 
+    def test_save_calls_update(self):
+        with patch.object(self.collection, 'update'):
+            doc = {'foo': 'bar'}
+            self.collection.save(doc)
+            self.collection.update.assert_called_with(doc)
+
     def test_update_actually_inserts(self):
         doc = {'foo': 'bar'}
 
@@ -114,6 +143,12 @@ class TestCollection(object):
         updated = self.collection.update(doc)
         assert updated['foo'] == 'baz'
 
+    def test_delete_calls_remove(self):
+        with patch.object(self.collection, 'remove'):
+            doc = {'foo': 'bar'}
+            self.collection.delete(doc)
+            self.collection.remove.assert_called_with(doc)
+
     def test_remove_raises_when_no_id(self):
         with raises(AssertionError):
             self.collection.remove({'foo': 'bar'})
@@ -125,6 +160,13 @@ class TestCollection(object):
 
         self.collection.remove(doc)
         assert 0 == int(self.collection.db.execute("select count(1) from foo").fetchone()[0])
+
+    @mark.parametrize('strdoc,doc', [
+        ('{"foo": "bar"}', {'_id': 1, 'foo': 'bar'}),
+        (u'{"foo": "☃"}', {'_id': 1, 'foo': u'☃'}),
+    ])
+    def test_load(self, strdoc, doc):
+        assert doc == self.collection._load(1, strdoc)
 
     def test_find(self):
         query = {'foo': 'bar'}
@@ -314,6 +356,37 @@ class TestCollection(object):
 
         with raises(nosqlite.MalformedQueryException):
             self.collection._apply_query(query, {'foo': 'bar'})
+
+    def test_get_operator_fn_improper_op(self):
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._get_operator_fn('foo')
+
+    def test_get_operator_fn_valid_op(self):
+        assert self.collection._get_operator_fn('$in') == nosqlite._in
+
+    def test_get_operator_fn_no_op(self):
+        with raises(nosqlite.MalformedQueryException):
+            self.collection._get_operator_fn('$foo')
+
+    def test_find_and_modify(self):
+        update = {'foo': 'bar'}
+        docs = [
+            {'foo': 'foo'},
+            {'baz': 'qux'},
+        ]
+        with patch.object(self.collection, 'find'):
+            with patch.object(self.collection, 'update'):
+                self.collection.find.return_value = docs
+                self.collection.find_and_modify(update=update)
+                self.collection.update.assert_has_calls([
+                    call({'foo': 'bar'}),
+                    call({'foo': 'bar', 'baz': 'qux'}),
+                ])
+
+    def test_count(self):
+        with patch.object(self.collection, 'find'):
+            self.collection.find.return_value = range(10)
+            assert self.collection.count() == 10
 
     def test_distinct(self):
         docs = [
