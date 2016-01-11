@@ -240,7 +240,6 @@ class Collection(object):
         to 'baz' and either the 'foo' key is an even number between 0 and 10 or is an odd number
         greater than 10.
         """
-
         matches = []  # A list of booleans
         reapply = lambda q: self._apply_query(q, document)
 
@@ -270,8 +269,12 @@ class Collection(object):
                 if '.' in field:
                     nodes = field.split('.')
                     document_section = document
-                    for path in nodes[:-1]:
-                        document_section = document_section.get(path, None)
+
+                    try:
+                        for path in nodes[:-1]:
+                            document_section = document_section.get(path, None)
+                    except AttributeError:
+                        document_section = None
 
                     if document_section is None:
                         matches.append(False)
