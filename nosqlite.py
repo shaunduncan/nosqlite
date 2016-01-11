@@ -240,11 +240,10 @@ class Collection(object):
         to 'baz' and either the 'foo' key is an even number between 0 and 10 or is an odd number
         greater than 10.
         """
+
         matches = []  # A list of booleans
         reapply = lambda q: self._apply_query(q, document)
 
-        # FIXME: Fields need to support dot notation for sub-documents
-        # i.e. {'foo.bar': 5} --> doc['foo']['bar'] == 5
         for field, value in query.items():
             # A more complex query type $and, $or, etc
             if field == '$and':
@@ -267,7 +266,20 @@ class Collection(object):
 
             # Standard
             elif value != document.get(field, None):
-                matches.append(False)
+                # check if field contains a dot
+                if '.' in field:
+                    nodes = field.split('.')
+                    document_section = document
+                    for path in nodes[:-1]:
+                        document_section = document_section.get(path, None)
+
+                    if document_section is None:
+                        matches.append(False)
+                    else:
+                        if value != document_section.get(nodes[-1], None):
+                            matches.append(False)
+                else:
+                    matches.append(False)
 
         return all(matches)
 
